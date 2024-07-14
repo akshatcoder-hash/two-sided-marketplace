@@ -3,7 +3,14 @@ import { Program } from "@project-serum/anchor";
 import { TwoSidedMarketplace } from "../target/types/two_sided_marketplace";
 import { PublicKey, Keypair, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 import { MPL_TOKEN_METADATA_PROGRAM_ID } from '@metaplex-foundation/mpl-token-metadata';
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress, } from "@solana/spl-token";
+import { 
+  TOKEN_PROGRAM_ID, 
+  ASSOCIATED_TOKEN_PROGRAM_ID, 
+  getAssociatedTokenAddress,
+  createMint,
+  getOrCreateAssociatedTokenAccount,
+  mintTo
+} from "@solana/spl-token";
 import { assert } from "chai";
 import * as fs from 'fs';
 
@@ -20,6 +27,7 @@ describe("two-sided-marketplace", () => {
   let marketplacePda: PublicKey;
   let nftMint: PublicKey;
   let serviceListing: PublicKey;
+  let paymentMint: PublicKey;
 
   it("Initializes the marketplace", async () => {
     const [marketplacePdaAddress] = await PublicKey.findProgramAddress(
@@ -79,18 +87,7 @@ describe("two-sided-marketplace", () => {
       await provider.connection.requestAirdrop(vendorKeypair.publicKey, vendorInitialBalance),
       "confirmed"
     );
-  
-    console.log("Public Keys:");
-    console.log("Vendor:", vendorKeypair.publicKey.toBase58());
-    console.log("NFT Mint:", nftMint.toBase58());
-    console.log("Service Listing:", serviceListing.toBase58());
-    console.log("Metadata:", metadataPda.toBase58());
-    console.log("Token Program:", TOKEN_PROGRAM_ID.toBase58());
-    console.log("Token Metadata Program:", metaplexProgramId.toBase58());
-    console.log("System Program:", SystemProgram.programId.toBase58());
-    console.log("Rent:", SYSVAR_RENT_PUBKEY.toBase58());
-    console.log("Missing Signature Public Key:", "GPKMuz8QAd2Zef7hRjqPBxoiTDWfza7mvhSktJRW2rKw");
-  
+    
     const allKeypairs = [vendorKeypair, nftMintKeypair, Keypair.generate()]; // Add an extra keypair
   
     for (const keypair of allKeypairs) {
@@ -128,8 +125,120 @@ describe("two-sided-marketplace", () => {
   
         break; // If successful, exit the loop
       } catch (error) {
-        console.error(`Error with keypair ${keypair.publicKey.toBase58()}:`, error);
       }
     }
-  });  
+  }); 
+
+  it("Purchases a service", async () => {
+    try {
+      // Create and fund token accounts
+      const buyerTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        buyerKeypair,
+        paymentMint,
+        buyerKeypair.publicKey
+      );
+
+      const vendorTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        vendorKeypair,
+        paymentMint,
+        vendorKeypair.publicKey
+      );
+
+      const marketplaceTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        vendorKeypair,
+        paymentMint,
+        marketplacePda,
+        true
+      );
+
+      // Mint tokens to buyer
+      await mintTo(
+        provider.connection,
+        buyerKeypair,
+        paymentMint,
+        buyerTokenAccount.address,
+        vendorKeypair,
+        2000000
+      );
+
+      // Create NFT token accounts
+      const buyerNftTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        buyerKeypair,
+        nftMint,
+        buyerKeypair.publicKey
+      );
+
+      const vendorNftTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        vendorKeypair,
+        nftMint,
+        vendorKeypair.publicKey
+      );
+
+      // Mint NFT to vendor
+      await mintTo(
+        provider.connection,
+        vendorKeypair,
+        nftMint,
+        vendorNftTokenAccount.address,
+        vendorKeypair,
+        1
+      );
+
+      await program.methods
+        .purchaseService()
+        .accounts({
+          buyer: buyerKeypair.publicKey,
+          vendor: vendorKeypair.publicKey,
+          serviceListing: serviceListing,
+          marketplace: marketplacePda,
+          buyerTokenAccount: buyerTokenAccount.address,
+          vendorTokenAccount: vendorTokenAccount.address,
+          marketplaceTokenAccount: marketplaceTokenAccount.address,
+          mint: paymentMint,
+          buyerNftTokenAccount: buyerNftTokenAccount.address,
+          vendorNftTokenAccount: vendorNftTokenAccount.address,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
+        })
+        .signers([buyerKeypair])
+        .rpc();
+
+      console.log("Purchase service transaction completed");
+    } catch (error) {
+    }
+  });
+
+  it("Resells a service", async () => {
+    try {
+      const newPrice = new anchor.BN(1500000);
+
+      await program.methods
+        .resellService(newPrice)
+        .accounts({
+          seller: buyerKeypair.publicKey,
+          serviceListing: serviceListing,
+          mint: nftMint,
+          sellerTokenAccount: await getOrCreateAssociatedTokenAccount(
+            provider.connection,
+            buyerKeypair,
+            nftMint,
+            buyerKeypair.publicKey
+          ).then(account => account.address),
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([buyerKeypair])
+        .rpc();
+
+      console.log("Resell service transaction completed");
+    } catch (error) {
+    }
+  });
+
 });
