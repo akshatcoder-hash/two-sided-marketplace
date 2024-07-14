@@ -11,7 +11,7 @@ two_sided_marketplace = "AamrL6gaYNEiFhRreM1JJTb9ZH4uBeNcryuW6Lp5FFR8"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "Devnet"
 wallet = "/Users/akshatsharma/.config/solana/id.json"
 
 [scripts]
